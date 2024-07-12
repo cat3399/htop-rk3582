@@ -12,6 +12,7 @@
 
 ## Introduction
 
+修改了linux、libSensors.c文件中获取温度的逻辑，直接通过 cat /sys/devices/virtual/thermal/thermal_zone2/temp获得温度，按照官方给的方法编译即可，配置的时候记得加上 --enable-sensors参数，并且提前安装 libsensors-dev 软件包
 `htop` is a cross-platform interactive process viewer.
 
 `htop` allows scrolling the list of processes vertically and horizontally to see their full command lines and related information like memory and CPU consumption.
