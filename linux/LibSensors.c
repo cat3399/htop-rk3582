@@ -25,7 +25,8 @@ in the source distribution for its full text.
 #include "Macros.h"
 #include "XUtils.h"
 #include "linux/LinuxMachine.h"
-
+#define MAX_PATH 256
+#define THERMAL_ZONE_PATH "/sys/devices/virtual/thermal/thermal_zone2/temp"
 
 #ifdef BUILD_STATIC
 
@@ -148,131 +149,47 @@ static int tempDriverPriority(const sensors_chip_name* chip) {
 
    return -1;
 }
+static double readTemperatureFromFile(const char* filePath) {
+    FILE* file = fopen(filePath, "r");
+    if (!file) {
+        perror("Failed to open temperature file");
+        return NAN;
+    }
 
+    char buffer[16];
+    if (!fgets(buffer, sizeof(buffer), file)) {
+        perror("Failed to read temperature");
+        fclose(file);
+        return NAN;
+    }
+    fclose(file);
+
+    return strtod(buffer, NULL) / 1000.0; // Convert to degrees Celsius
+}
 void LibSensors_getCPUTemperatures(CPUData* cpus, unsigned int existingCPUs, unsigned int activeCPUs) {
-   assert(existingCPUs > 0 && existingCPUs < 16384);
+    assert(existingCPUs > 0 && existingCPUs < 16384);
 
-   double* data = xMallocArray(existingCPUs + 1, sizeof(double));
-   for (size_t i = 0; i < existingCPUs + 1; i++)
-      data[i] = NAN;
+    double* data = (double*)malloc((existingCPUs + 1) * sizeof(double));
+    if (!data) {
+        perror("Failed to allocate memory for temperature data");
+        return;
+    }
 
-#ifndef BUILD_STATIC
-   if (!dlopenHandle)
-      goto out;
-#endif /* !BUILD_STATIC */
+    for (size_t i = 0; i < existingCPUs + 1; i++)
+        data[i] = NAN;
 
-   unsigned int coreTempCount = 0;
-   int topPriority = 99;
+    double temp = readTemperatureFromFile(THERMAL_ZONE_PATH);
 
-   int n = 0;
-   for (const sensors_chip_name* chip = sym_sensors_get_detected_chips(NULL, &n); chip; chip = sym_sensors_get_detected_chips(NULL, &n)) {
-      const int priority = tempDriverPriority(chip);
-      if (priority < 0)
-         continue;
+    // If the temperature is valid, set it for all CPUs
+    if (!isnan(temp)) {
+        for (size_t i = 0; i <= existingCPUs; i++)
+            data[i] = temp;
+    }
 
-      if (priority > topPriority)
-         continue;
+    for (size_t i = 0; i <= existingCPUs; i++)
+        cpus[i].temperature = data[i];
 
-      if (priority < topPriority) {
-         /* Clear data from lower priority sensor */
-         for (size_t i = 0; i < existingCPUs + 1; i++)
-            data[i] = NAN;
-      }
-
-      topPriority = priority;
-
-      int m = 0;
-      for (const sensors_feature* feature = sym_sensors_get_features(chip, &m); feature; feature = sym_sensors_get_features(chip, &m)) {
-         if (feature->type != SENSORS_FEATURE_TEMP)
-            continue;
-
-         if (!feature->name || !String_startsWith(feature->name, "temp"))
-            continue;
-
-         unsigned long int tempID = strtoul(feature->name + strlen("temp"), NULL, 10);
-         if (tempID == 0 || tempID == ULONG_MAX)
-            continue;
-
-         /* Feature name IDs start at 1, adjust to start at 0 to match data indices */
-         tempID--;
-
-         if (tempID > existingCPUs)
-            continue;
-
-         const sensors_subfeature* subFeature = sym_sensors_get_subfeature(chip, feature, SENSORS_SUBFEATURE_TEMP_INPUT);
-         if (!subFeature)
-            continue;
-
-         double temp;
-         int r = sym_sensors_get_value(chip, subFeature->number, &temp);
-         if (r != 0)
-            continue;
-
-         /* If already set, e.g. Ryzen reporting platform temperature for each die, use the bigger one */
-         if (isNaN(data[tempID])) {
-            data[tempID] = temp;
-            if (tempID > 0)
-               coreTempCount++;
-         } else {
-            data[tempID] = MAXIMUM(data[tempID], temp);
-         }
-      }
-   }
-
-   /* Adjust data for chips not providing a platform temperature */
-   if (coreTempCount + 1 == activeCPUs || coreTempCount + 1 == activeCPUs / 2) {
-      memmove(&data[1], &data[0], existingCPUs * sizeof(*data));
-      data[0] = NAN;
-      coreTempCount++;
-
-      /* Check for further adjustments */
-   }
-
-   /* Only package temperature - copy to all cores */
-   if (coreTempCount == 0 && !isNaN(data[0])) {
-      for (size_t i = 1; i <= existingCPUs; i++)
-         data[i] = data[0];
-
-      /* No further adjustments */
-      goto out;
-   }
-
-   /* No package temperature - set to max core temperature */
-   if (coreTempCount > 0 && isNaN(data[0])) {
-      double maxTemp = -HUGE_VAL;
-      for (size_t i = 1; i <= existingCPUs; i++) {
-         if (isgreater(data[i], maxTemp)) {
-            maxTemp = data[i];
-            data[0] = data[i];
-         }
-      }
-
-      /* Check for further adjustments */
-   }
-
-   /* Only temperature for core 0, maybe Ryzen - copy to all other cores */
-   if (coreTempCount == 1 && !isNaN(data[1])) {
-      for (size_t i = 2; i <= existingCPUs; i++)
-         data[i] = data[1];
-
-      /* No further adjustments */
-      goto out;
-   }
-
-   /* Half the temperatures, probably HT/SMT - copy to second half */
-   const size_t delta = activeCPUs / 2;
-   if (coreTempCount == delta) {
-      memcpy(&data[delta + 1], &data[1], delta * sizeof(*data));
-
-      /* No further adjustments */
-      goto out;
-   }
-
-out:
-   for (size_t i = 0; i <= existingCPUs; i++)
-      cpus[i].temperature = data[i];
-
-   free(data);
+    free(data);
 }
 
 #endif /* HAVE_SENSORS_SENSORS_H */
