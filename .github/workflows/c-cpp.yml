@@ -1,0 +1,44 @@
+name: Build on ARM64 Ubuntu 20.04
+
+on:
+  push:
+    branches:
+      - main  # 触发条件：当推送到 main 分支时触发
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04  # 使用 Ubuntu 20.04
+
+    # 设置要使用的虚拟环境架构为 ARM64
+    architecture: arm64
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2  # 检出代码
+
+    - name: Set up ARM64 architecture
+      uses: docker/setup-buildx-action@v2  # 配置多架构支持
+
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y pkg-config libncurses-dev libssl-dev unzip git make lm-sensors libncursesw5-dev autotools-dev autoconf automake build-essential libsensors-dev
+
+    - name: Run autogen and configure
+      run: |
+        ./autogen.sh
+        ./configure --enable-static --enable-sensors
+
+    - name: Build the project
+      run: |
+        make -j$(nproc)
+
+    - name: Verify the build
+      run: |
+        ls -lh htop  # 确认 htop 文件已经生成
+
+    - name: Upload the build artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: htop
+        path: htop  # 上传生成的 htop 可执行文件
