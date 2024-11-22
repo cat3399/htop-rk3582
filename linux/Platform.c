@@ -791,6 +791,7 @@ static void Platform_Battery_getSysData(double* percent, ACPresence* isOnAC) {
 #else
       char entryFd[4096];
       xSnprintf(entryFd, sizeof(entryFd), SYS_POWERSUPPLY_DIR "/%s", entryName);
+      // xSnprintf 字符串拼接
 #endif
 
       enum { AC, BAT } type;
@@ -801,6 +802,7 @@ static void Platform_Battery_getSysData(double* percent, ACPresence* isOnAC) {
       } else {
          char buffer[32];
          ssize_t ret = xReadfileat(entryFd, "type", buffer, sizeof(buffer));
+         // xReadfileat 读取entryFd的内容到buffer
          if (ret <= 0)
             goto next;
 
@@ -837,8 +839,10 @@ static void Platform_Battery_getSysData(double* percent, ACPresence* isOnAC) {
                continue;
 
             if (String_eq(field, "CAPACITY")) {
-               capacityLevel = val / 100.0;
-               continue;
+               capacityLevel = val;
+               *percent = capacityLevel>0 ? capacityLevel : NAN;
+//               break;
+// 123456
             }
 
             if (String_eq(field, "ENERGY_FULL") || String_eq(field, "CHARGE_FULL")) {
@@ -885,7 +889,7 @@ next:
 
    closedir(dir);
 
-   *percent = totalFull > 0 ? ((double) totalRemain * 100.0) / (double) totalFull : NAN;
+   // *percent = totalFull > 0 ? ((double) totalRemain * 100.0) / (double) totalFull : NAN;
 }
 
 void Platform_getBattery(double* percent, ACPresence* isOnAC) {
